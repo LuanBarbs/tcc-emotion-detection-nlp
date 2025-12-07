@@ -1,0 +1,14 @@
+jupyter
+ipykernel
+
+pandas
+numpy
+scikit-learn
+matplotlib
+seaborn
+
+nltk
+# gensim
+# transformers
+# torch
+# tensorflowa
