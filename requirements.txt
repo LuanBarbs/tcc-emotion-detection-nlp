@@ -8,6 +8,10 @@ matplotlib
 seaborn
 
 nltk
+
+ydata_profiling
+collections
+langdetect
 # gensim
 # transformers
 # torch
