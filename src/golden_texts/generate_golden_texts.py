@@ -7,9 +7,9 @@ Original file is located at
     https://colab.research.google.com/drive/1Jhw_HtH-He0hZPua8M9Yj6Spnfpr_oPL
 """
 
-!pip install -q transformers accelerate bitsandbytes sentencepieceb
-!pip install --upgrade transformers
-!pip install --upgrade accelerate bitsandbytes
+# !pip install -q transformers accelerate bitsandbytes sentencepieceb
+# !pip install --upgrade transformers
+# !pip install --upgrade accelerate bitsandbytes
 
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig

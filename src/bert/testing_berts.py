@@ -7,7 +7,7 @@ Original file is located at
     https://colab.research.google.com/drive/1wco7wbX1Ktl2G2qpOIWpzk62ixeGuTmv
 """
 
-!pip install -q transformers datasets accelerate scikit-learn torch reportlab
+# !pip install -q transformers datasets accelerate scikit-learn torch reportlab
 
 import os
 import json
