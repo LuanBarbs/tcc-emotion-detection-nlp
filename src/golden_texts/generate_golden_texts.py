@@ -8,8 +8,17 @@ Original file is located at
 """
 
 # !pip install -q transformers accelerate bitsandbytes sentencepieceb
-# !pip install --upgrade transformers
-# !pip install --upgrade accelerate bitsandbytes
+# !pip install -q --upgrade transformers
+# !pip install -q --upgrade accelerate bitsandbytes
+
+import os
+import re
+import json
+import random
+import pandas as pd
+from tqdm import tqdm
+
+from sklearn.model_selection import train_test_split
 
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
@@ -30,41 +39,481 @@ model = AutoModelForCausalLM.from_pretrained(
     device_map="auto",
     quantization_config=bnb_config,
     dtype=torch.float16,
-    trust_remote_code=True
+    trust_remote_code=True,
+    low_cpu_mem_usage=True,
 )
 
-def build_prompt(emotion="Felicidade"):
+def get_system_prompt():
+  return "A saída deve ser sempre em JSON, respeitando o formato enviado."
+
+def extract_json(text):
+  if not text:
+    return None
+
+  text = re.sub(r"```json|```", "", text).strip()
+
+  matches = re.findall(r"\{.*?\}", text, re.DOTALL)
+
+  for candidate in reversed(matches):
+    try:
+      return json.loads(candidate)
+    except:
+      continue
+
+  return None
+
+def load_existing_results(path):
+  if os.path.exists(path):
+    with open(path, "r", encoding="utf-8") as f:
+      return json.load(f)
+  return {}
+
+def save_results(results, path):
+  with open(path, "w", encoding="utf-8") as f:
+    json.dump(results, f, ensure_ascii=False, indent=2)
+
+"""## Paraphrasing Examples"""
+
+df = pd.read_csv("/content/go_emotions_treated.csv")
+
+df['BASE_TEXT_PT'] = df['BASE_TEXT_PT'].fillna("").astype(str)
+
+emotions = [
+    'admiration','amusement','anger','annoyance','approval','caring',
+    'confusion','curiosity','desire','disappointment','disapproval',
+    'disgust','embarrassment','excitement','fear','gratitude','grief',
+    'joy','love','nervousness','optimism','pride','realization','relief',
+    'remorse','sadness','surprise','neutral'
+]
+
+X = df["BASE_TEXT_PT"]
+y = df[emotions]
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, train_size=0.8, random_state=42
+)
+
+examples = {}
+
+n_samples = 3
+
+random.seed(42)
+for emotion in emotions:
+  idx = y_train[y_train[emotion] == 1].index
+
+  texts = X_train.loc[idx].tolist()
+
+  sampled = random.sample(texts, min(n_samples, len(texts)))
+
+  examples[emotion] = sampled
+
+def get_paraphrase_examples_prompt(emotion, examples):
   return f"""
-Gere 2 textos curtos (1–3 frases) que expressem fortemente a emoção: {emotion}.
+Os textos a seguir contêm a emoção: {emotion}.
 
-Requisitos:
-- Cada texto deve representar um contexto diferente (ex: trabalho, família, redes sociais, etc.)
-- Varie o estilo (formal, informal, introspectivo, narrativo)
-- Evite frases genéricas
-- Use linguagem natural em português
+Texto 1: {examples[emotion][0]}
+Texto 2: {examples[emotion][1]}
+Texto 3: {examples[emotion][2]}
 
-Emoção: {emotion}
+TAREFA:
+- Parafraseie os textos enviados separadamente.
+- Utilize sinônimos, modifique a estrutura e misture os textos se for possível.
+- Gere uma versão nova para cada texto enviado que mantenha a emoção ({emotion}) presente no texto.
+
+Regras IMPORTANTES:
+- NÃO explique nada.
+- NÃO realize análises.
+- Gere SOMENTE a resposta final.
+
+Responda SOMENTE com JSON válido:
+{{
+    "Paraphrased_Text_1": "",
+    "Paraphrased_Text_2": "",
+    "Paraphrased_Text_3": "",
+}}
 """
 
-def generate_text(emotion, temperature=0.8, max_new_tokens=200):
-    prompt = build_prompt(emotion)
+def parse_paraphrased_texts(text):
+  try:
+    data = extract_json(text)
 
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    if not data:
+      raise ValueError("JSON do not found or invalid")
+
+    paraphrases = [
+        data.get("Paraphrased_Text_1", ""),
+        data.get("Paraphrased_Text_2", ""),
+        data.get("Paraphrased_Text_3", "")
+    ]
+
+    paraphrases = [p.strip() for p in paraphrases if p.strip()]
+
+    return paraphrases
+
+  except Exception as e:
+    print("Error in parse:", e)
+    return []
+
+def generate_paraphrased_texts(emotion, examples):
+    messages = [
+        {
+            "role": "system",
+            "content": get_system_prompt()
+        },
+        {
+            "role": "user",
+            "content": get_paraphrase_examples_prompt(emotion, examples)
+        }
+    ]
+
+    text_input = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=False
+    )
+
+    inputs = tokenizer(text_input, return_tensors="pt").to(model.device)
 
     outputs = model.generate(
         **inputs,
-        max_new_tokens=max_new_tokens,
-        temperature=temperature,
-        top_p=0.9,
-        do_sample=True
+        max_new_tokens=800,
+        do_sample=False,
+        repetition_penalty=1.2,
+        pad_token_id=tokenizer.eos_token_id,
+        eos_token_id=tokenizer.eos_token_id,
     )
 
-    text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-    return text
+    return parse_paraphrased_texts(generated_text)
 
-emotion = "alegria"
+OUTPUT_PATH = "/content/paraphrases.json"
 
-output = generate_text(emotion)
+def generate_paraphrases_for_all_emotions(emotions, examples, save_path):
+  results = load_existing_results(save_path)
 
-print(output)
+  for emotion in tqdm(emotions):
+    if emotion in results and len(results[emotion]) >= 3:
+      print(f"Skiping {emotion}")
+      continue
+
+    try:
+      paraphrases = generate_paraphrased_texts(emotion, examples)
+      if len(paraphrases) < 3:
+        print(f"Problem in {emotion}")
+
+      results[emotion] = paraphrases
+      save_results(results, save_path)
+    except Exception as e:
+      print(f"Error in {emotion}: {e}")
+
+  return results
+
+results = generate_paraphrases_for_all_emotions(emotions, examples, OUTPUT_PATH)
+
+"""## Generate Golden Texts"""
+
+def get_generate_golden_texts_prompt(emotion, paraphrases):
+  return f"""
+Os textos a seguir são exemplos de textos que contêm a emoção: {emotion}.
+
+EXEMPLOS:
+- Exemplo 1: {paraphrases[emotion][0]}
+- Exemplo 2: {paraphrases[emotion][1]}
+- Exemplo 3: {paraphrases[emotion][2]}
+
+TAREFA:
+- Utilizando esses exemplos apenas como inspiração, entenda como a emoção {emotion} é expressada pelo texto.
+- Gere 5 novos textos (1–3 frases) que expressem fortemente essa emoção ({emotion}).
+- Os novos textos devem expressar a emoção de tal forma que não se tenha dúvidas que essa emoção está sendo expressa.
+
+REGRAS:
+- Cada texto deve representar um contextos diferentes.
+- Varie o estilo (formal, informal, introspectivo, narrativo).
+- Evite frases genéricas.
+- Use linguagem natural em português.
+- Não se baseie demais nos textos enviados como exemplo.
+
+EMOÇÃO: {emotion}
+
+Responda SOMENTE com JSON válido:
+{{
+    "{emotion}_Golden_Text_1": "",
+    "{emotion}_Golden_Text_2": "",
+    "{emotion}_Golden_Text_3": "",
+    "{emotion}_Golden_Text_4": "",
+    "{emotion}_Golden_Text_5": ""
+}}
+"""
+
+def get_detect_emotion_prompt(golden_text):
+  return f"""
+Você deve trabalhar como um detector de emoções em textos.
+
+CONTEXTO:
+- As únicas emoções que você conhece estão na lista abaixo:
+  Lista_de_emoções = [admiration, amusement, anger, annoyance, approval, caring,  confusion, curiosity, desire, disappointment, disapproval,
+    disgust, embarrassment, excitement, fear, gratitude, grief,  joy, love, nervousness, optimism, pride, realization, relief,
+    remorse, sadness, surprise, neutral]
+
+TAREFA:
+- Identifique apenas UMA emoção no texto ouro.
+  TEXTO_OURO: {golden_text}
+
+REGRAS:
+- Você não pode identificar mais que uma emoção no texto ouro.
+- A emoção não pode estar fora da lista de emoções.
+
+Responda SOMENTE com JSON válido:
+{{
+    "EMOTION": ""
+}}
+"""
+
+def get_detect_approval_prompt(golden_text):
+  return f"""
+Você deve trabalhar como um detector de emoções em textos.
+
+CONTEXTO:
+- As únicas emoções que você conhece estão na lista abaixo:
+  Lista_de_emoções = [admiration, amusement, anger, annoyance, approval, caring,  confusion, curiosity, desire, disappointment, disapproval,
+    disgust, embarrassment, excitement, fear, gratitude, grief,  joy, love, nervousness, optimism, pride, realization, relief,
+    remorse, sadness, surprise, neutral]
+
+TAREFA:
+- Identifique apenas UMA emoção no texto ouro.
+  TEXTO_OURO: {golden_text}
+
+REGRAS:
+- Você não pode identificar mais que uma emoção no texto ouro.
+- A emoção não pode estar fora da lista de emoções.
+- Tenha cuidado na identificação de approval ou disapproval.
+- Não confuda approval com joy.
+
+Responda SOMENTE com JSON válido:
+{{
+    "EMOTION": ""
+}}
+"""
+
+def parse_golden_texts(text, emotion):
+  try:
+    data = extract_json(text)
+
+    if not data:
+      raise ValueError("JSON do not found or invalid")
+
+    paraphrases = [
+        data.get(f"{emotion}_Golden_Text_1", ""),
+        data.get(f"{emotion}_Golden_Text_2", ""),
+        data.get(f"{emotion}_Golden_Text_3", ""),
+        data.get(f"{emotion}_Golden_Text_4", ""),
+        data.get(f"{emotion}_Golden_Text_5", "")
+    ]
+
+    paraphrases = [p.strip() for p in paraphrases if p.strip()]
+
+    return paraphrases
+
+  except Exception as e:
+    print("Error in parse:", e)
+    return []
+
+def generate_golden_text(emotion, paraphrases):
+  messages = [
+      {
+          "role": "system",
+          "content": get_system_prompt()
+      },
+      {
+          "role": "user",
+          "content": get_generate_golden_texts_prompt(emotion, paraphrases)
+      }
+  ]
+
+  text_input = tokenizer.apply_chat_template(
+      messages,
+      tokenize=False,
+      add_generation_prompt=True,
+      enable_thinking=False
+  )
+
+  inputs = tokenizer(text_input, return_tensors="pt").to(model.device)
+
+  outputs = model.generate(
+      **inputs,
+      max_new_tokens=1200,
+      do_sample=True,
+      temperature=0.8,
+      repetition_penalty=1.2,
+      pad_token_id=tokenizer.eos_token_id,
+      eos_token_id=tokenizer.eos_token_id,
+  )
+
+  generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+  return parse_golden_texts(generated_text, emotion)
+
+def parse_emotion(text):
+  try:
+    data = extract_json(text)
+
+    if not data:
+      raise ValueError("JSON do not found or invalid")
+
+    paraphrases = [
+        data.get("EMOTION", ""),
+    ]
+
+    paraphrases = [p.strip() for p in paraphrases if p.strip()]
+
+    return paraphrases
+
+  except Exception as e:
+    print("Error in parse:", e)
+    return []
+
+def detect_emotion(golden_text, emotion):
+  messages = [
+      {
+          "role": "system",
+          "content": get_system_prompt()
+      },
+      {
+          "role": "user",
+          "content": get_detect_approval_prompt(golden_text) if (emotion == "approval" or emotion == "disapproval") else get_detect_emotion_prompt(golden_text)
+      }
+  ]
+
+  text_input = tokenizer.apply_chat_template(
+      messages,
+      tokenize=False,
+      add_generation_prompt=True,
+      enable_thinking=False
+  )
+
+  inputs = tokenizer(text_input, return_tensors="pt").to(model.device)
+
+  outputs = model.generate(
+      **inputs,
+      max_new_tokens=200,
+      do_sample=False,
+      repetition_penalty=1.2,
+      pad_token_id=tokenizer.eos_token_id,
+      eos_token_id=tokenizer.eos_token_id,
+  )
+
+  generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+  return parse_emotion(generated_text)
+
+PARAPHRASES_PATH = "/content/paraphrases.json"
+
+def load_paraphrases(path):
+  with open(path, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+  return data
+
+paraphrases = load_paraphrases(PARAPHRASES_PATH)
+
+EMOTION_EQUIVALENTS_APPROVAL = {
+    "approval": ["approval", "admiration", "optimism", "curiosity", "desire"],
+    "disapproval": ["disapproval", "anger", "annoyance", "disgust", "disappointment"]
+}
+
+def is_good_text(text):
+  return len(text.split()) > 5
+
+def generate_golden_dataset(emotions, paraphrases, save_path, min_texts=15):
+  results = load_existing_results(save_path)
+
+  for emotion in tqdm(emotions):
+    existing = results.get(emotion, [])
+
+    if len(existing) >= min_texts:
+      print(f"Skipping {emotion}")
+      continue
+
+    print(f"Processing {emotion}...")
+
+    collected = existing.copy()
+    seen_texts = set([t.strip().lower() for t in collected])
+
+    attempts = 0
+    max_attempts = 30
+
+    while len(collected) < min_texts and attempts < max_attempts:
+      attempts += 1
+
+      if attempts > 10 and len(collected) == 0:
+        print(f"Serious problem with {emotion}")
+        break
+
+      try:
+        candidates = generate_golden_text(emotion, paraphrases)
+
+        if not candidates:
+          continue
+
+        for text in candidates:
+          text_clean = text.strip()
+          text_key = text_clean.lower()
+
+          if text_key in seen_texts:
+            continue
+
+          if (not is_good_text(text)):
+            continue
+
+          detected = detect_emotion(text, emotion)
+
+          if not detected:
+            continue
+
+          predicted_emotion = detected[0].strip().lower()
+          emotion_clean = emotion.strip().lower()
+
+          if emotion == "approval":
+            if predicted_emotion in EMOTION_EQUIVALENTS_APPROVAL["approval"]:
+              collected.append(text)
+              seen_texts.add(text_key)
+          elif emotion == "disapproval":
+            if predicted_emotion in EMOTION_EQUIVALENTS_APPROVAL["disapproval"]:
+              collected.append(text)
+              seen_texts.add(text_key)
+          else:
+            if predicted_emotion == emotion_clean:
+              collected.append(text)
+              seen_texts.add(text_key)
+
+        print(f"{emotion}: {len(collected)}/{min_texts}")
+
+        results[emotion] = collected
+        save_results(results, save_path)
+
+      except Exception as e:
+        print(f"Error in {emotion}: {e}")
+
+    results[emotion] = collected[:min_texts]
+    save_results(results, save_path)
+
+  return results
+
+OUTPUT_PATH = "/content/golden_texts.json"
+
+emotions = [
+    'admiration','amusement','anger','annoyance','approval','caring',
+    'confusion','curiosity','desire','disappointment','disapproval',
+    'disgust','embarrassment','excitement','fear','gratitude','grief',
+    'joy','love','nervousness','optimism','pride','realization','relief',
+    'remorse','sadness','surprise','neutral'
+]
+
+results = generate_golden_dataset(
+    emotions,
+    paraphrases,
+    OUTPUT_PATH,
+    min_texts=15
+)
