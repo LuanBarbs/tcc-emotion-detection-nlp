@@ -2,3 +2,4 @@
 /data/out
 /data/model
 venv/
+/data/meta/go_emotions_meta.csv
