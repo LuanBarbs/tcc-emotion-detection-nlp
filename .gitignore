@@ -1,4 +1,5 @@
 /data/treated
 /data/feat
 /data/model
+/data/checkpoints
 venv/
