@@ -1,0 +1,43 @@
+{
+  "objetivo": "Medir o BERTimbau com o MESMO tratamento de limiar que o Ensemble Fuzzy recebe (calibrado por emocao, OOF), em vez de 0.5 fixo.",
+  "protocolo": "Para cada outer fold k: limiares calibrados por emocao nas probabilidades OOF dos folds j!=k (grade identica a THRESH_GRID do fuzzy), aplicados em P_BERT[k]. Nenhum limiar escolhido no fold de teste.",
+  "grade_justa": [
+    0.05,
+    0.95,
+    19
+  ],
+  "nota_metrica": "ROC-AUC e otimista sob desbalanceamento; Average Precision (PR-AUC) e a metrica de ranking apropriada para labels raros.",
+  "ressalva": "P_BERT herda do baseline a selecao da melhor epoca pelo F1 no proprio fold de teste; como o Ensemble Fuzzy usa o mesmo P_BERT, a comparacao relativa nao e afetada, mas o valor absoluto e levemente otimista.",
+  "resultados": {
+    "BERT@0.5": {
+      "f1_macro": "0.3990 +/- 0.0095",
+      "precision_macro": "0.6072",
+      "recall_macro": "0.3415",
+      "avg_precision_macro": "0.4353",
+      "roc_auc_macro": "0.8930"
+    },
+    "BERT@tuned": {
+      "f1_macro": "0.4688 +/- 0.0090",
+      "precision_macro": "0.4720",
+      "recall_macro": "0.4864",
+      "avg_precision_macro": "0.4353",
+      "roc_auc_macro": "0.8930"
+    },
+    "LR@0.5": {
+      "f1_macro": "0.3655 +/- 0.0052",
+      "precision_macro": "0.3240",
+      "recall_macro": "0.4652",
+      "avg_precision_macro": "0.3362",
+      "roc_auc_macro": "0.8390"
+    },
+    "LR@tuned": {
+      "f1_macro": "0.3784 +/- 0.0050",
+      "precision_macro": "0.3747",
+      "recall_macro": "0.4119",
+      "avg_precision_macro": "0.3362",
+      "roc_auc_macro": "0.8390"
+    }
+  },
+  "limiar_medio_bert": 0.2757142857142857,
+  "n_emocoes_limiar_abaixo_0.5": 28
+}
