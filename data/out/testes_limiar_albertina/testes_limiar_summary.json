@@ -1,0 +1,43 @@
+{
+  "objetivo": "Medir o Albertina com o MESMO tratamento de limiar que o Ensemble Fuzzy recebe (calibrado por emocao, OOF), em vez de 0.5 fixo.",
+  "protocolo": "Para cada outer fold k: limiares calibrados por emocao nas probabilidades OOF dos folds j!=k (grade identica a THRESH_GRID do fuzzy), aplicados em P_Albertina[k]. Nenhum limiar escolhido no fold de teste.",
+  "grade_justa": [
+    0.05,
+    0.95,
+    19
+  ],
+  "nota_metrica": "ROC-AUC e otimista sob desbalanceamento; Average Precision (PR-AUC) e a metrica de ranking apropriada para labels raros.",
+  "ressalva": "P_Albertina herda do baseline a selecao da melhor epoca pelo F1 no proprio fold de teste; como o Ensemble Fuzzy usa o mesmo P_Albertina, a comparacao relativa nao e afetada, mas o valor absoluto e levemente otimista.",
+  "resultados": {
+    "Albertina@0.5": {
+      "f1_macro": "0.4189 +/- 0.0065",
+      "precision_macro": "0.5705",
+      "recall_macro": "0.3615",
+      "avg_precision_macro": "0.4308",
+      "roc_auc_macro": "0.8915"
+    },
+    "Albertina@tuned": {
+      "f1_macro": "0.4660 +/- 0.0045",
+      "precision_macro": "0.4625",
+      "recall_macro": "0.4866",
+      "avg_precision_macro": "0.4308",
+      "roc_auc_macro": "0.8915"
+    },
+    "LR@0.5": {
+      "f1_macro": "0.3655 +/- 0.0052",
+      "precision_macro": "0.3240",
+      "recall_macro": "0.4652",
+      "avg_precision_macro": "0.3362",
+      "roc_auc_macro": "0.8390"
+    },
+    "LR@tuned": {
+      "f1_macro": "0.3784 +/- 0.0050",
+      "precision_macro": "0.3747",
+      "recall_macro": "0.4119",
+      "avg_precision_macro": "0.3362",
+      "roc_auc_macro": "0.8390"
+    }
+  },
+  "limiar_medio_albertina": 0.2971428571428571,
+  "n_emocoes_limiar_abaixo_0.5": 27
+}
