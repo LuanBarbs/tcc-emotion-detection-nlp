@@ -3,3 +3,5 @@
 /data/model
 /data/checkpoints
 venv*/
+/data/lexicons/
+/data/cache/
