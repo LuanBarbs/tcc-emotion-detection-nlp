@@ -1,6 +1,5 @@
 """
 ETAPA 2 — Análise completa das 28 emoções (BERTimbau @limiar calibrado)
-=======================================================================
 
 Objetivo: para CADA emoção, produzir
     F1 | frequência | precision | recall | suporte | principais confusões | grupo Ekman
