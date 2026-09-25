@@ -1,0 +1,13 @@
+{
+  "model": "QWEN few-shot (retrieval, k=8)",
+  "model_id": "Qwen/Qwen3.5-9B",
+  "embedding": "paraphrase-multilingual-MiniLM-L12-v2",
+  "strategy": "Outer CV (5 folds), zero fine-tuning",
+  "n_labels": 28,
+  "f1_macro_mean": 0.2751,
+  "f1_macro_std": 0.0029,
+  "f1_micro_mean": 0.2503,
+  "f1_micro_std": 0.0024,
+  "roc_auc_mean": 0.7211,
+  "roc_auc_std": 0.002
+}

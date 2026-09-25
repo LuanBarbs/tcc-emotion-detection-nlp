@@ -1,0 +1,2 @@
+MONITOR
+python3.12 src/monitor.py
